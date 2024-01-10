@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<style>
+			body {
+				background:#000;
+				color:#fff;
+				padding:0;
+				margin:0;
+				overflow:hidden;
+			}
+		</style>
+
+	</head>
+	<body>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"></script>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+		<script src="js/loaders/PLYLoader.js"></script>
+		<script src="js/loaders/STLLoader.js"></script>
+		<script src="js/loaders/OBJLoader2.js"></script>
+		<script src="js/Detector.js"></script>
+		<script src="js/stats.min.js"></script>
+		<script src="js/dat.gui.min.js"></script>
+
+		<script id="fragment_shader" type="x-shader/x-fragment">
+			uniform vec3 LightDirection1;
+			uniform vec3 specularColor;
+			//uniform vec3 diffuseColor;
+			//uniform float roughnessValue; // 0 : smooth, 1: rough
+			//uniform float F0; // fresnel reflectance at normal incidence
+			uniform float k; // fraction of diffuse reflection (specular reflection = 1 - k)
+
+			uniform sampler2D diffuseMap;
+			uniform sampler2D roughnessMap;
+			uniform sampler2D specularMap;
+			uniform sampler2D normalMap;
+
+			varying vec3 vnormal;
+			varying vec3 vpos;
+			varying vec2 vUv;	
+
+			vec3 getNormal(vec3 normal, sampler2D normalMap,vec2 vUv){
+				vec3 a = vec3(0.0, 0.0, 1.0);
+				
+				vec3 nu = vec3(a[1]*normal[2]-a[2]*normal[1], a[2]*normal[0]-a[0]*normal[2], a[0]*normal[1]-a[1]*normal[0]);
+				mat3 nu_skew = mat3(0, -nu[2], nu[1], nu[2], 0, -nu[0], -nu[1], nu[0], 0);
+				float c = a[0]*normal[0]+a[1]*normal[1]+a[2]*normal[2];
+
+				mat3 R;				
+				R[0][0] = (nu_skew[0][0]*nu_skew[0][0]+nu_skew[0][1]*nu_skew[1][0]+nu_skew[0][2]*nu_skew[2][0])/(1.0+c);
+				R[0][1] = (nu_skew[0][0]*nu_skew[0][1]+nu_skew[0][1]*nu_skew[1][1]+nu_skew[0][2]*nu_skew[2][1])/(1.0+c);
+				R[0][2] = (nu_skew[0][0]*nu_skew[0][2]+nu_skew[0][1]*nu_skew[1][2]+nu_skew[0][2]*nu_skew[2][2])/(1.0+c);
+
+				R[1][0] = (nu_skew[1][0]*nu_skew[0][0]+nu_skew[1][1]*nu_skew[1][0]+nu_skew[1][2]*nu_skew[2][0])/(1.0+c);
+				R[1][1] = (nu_skew[1][0]*nu_skew[0][1]+nu_skew[1][1]*nu_skew[1][1]+nu_skew[1][2]*nu_skew[2][1])/(1.0+c);
+				R[1][2] = (nu_skew[1][0]*nu_skew[0][2]+nu_skew[1][1]*nu_skew[1][2]+nu_skew[1][2]*nu_skew[2][2])/(1.0+c);
+
+				R[2][0] = (nu_skew[2][0]*nu_skew[0][0]+nu_skew[2][1]*nu_skew[1][0]+nu_skew[2][2]*nu_skew[2][0])/(1.0+c);
+				R[2][1] = (nu_skew[2][0]*nu_skew[0][1]+nu_skew[2][1]*nu_skew[1][1]+nu_skew[2][2]*nu_skew[2][1])/(1.0+c);
+				R[2][2] = (nu_skew[2][0]*nu_skew[0][2]+nu_skew[2][1]*nu_skew[1][2]+nu_skew[2][2]*nu_skew[2][2])/(1.0+c);
+				
+				R = mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0) + nu_skew + R;
+
+				a = texture2D(normalMap, vUv).rgb;					
+				a = normalize(a);		
+
+				normal = vec3(R[0][0]*a[0]+R[0][1]*a[1]+R[0][2]*a[2], R[1][0]*a[0]+R[1][1]*a[1]+R[1][2]*a[2], R[2][0]*a[0]+R[2][1]*a[1]+R[2][2]*a[2]);
+				normal = normalize(normal);
+
+				return normal;
+			}
+						
+
+			void main()
+			{
+				vec3 lightDirection = normalize(LightDirection1-vpos); // to light
+				//vec3 lightDirection = normalize(LightDirection1);
+				float r = length(LightDirection1-vpos);
+			    vec3 normal = normalize(vnormal);
+
+				float old_NdotL = dot(normal, lightDirection);
+
+				normal = getNormal(normal, normalMap, vUv);
+				
+			    float NdotL = dot(normal, lightDirection);
+
+				old_NdotL = NdotL;
+
+				vec3 diffuseColor = texture2D(diffuseMap, vUv).rgb;
+				vec3 roughnessValue = texture2D(roughnessMap, vUv).rgb;
+				vec3 F0 = texture2D(specularMap, vUv).rgb;
+
+				diffuseColor = diffuseColor * (1.0 - F0);
+				diffuseColor = diffuseColor / 3.14159265358979323846264;
+			    
+			    vec3 specular = vec3(0.0, 0.0, 0.0);				
+			    if(old_NdotL > 0.0)
+			    {
+					//normal = getNormal(normal, normalMap, vUv);
+
+					//float NdotL = dot(normal, lightDirection);
+					
+			        vec3 eyeDir = normalize(-vpos); // to eye
+			        vec3 halfVector = normalize(lightDirection + eyeDir);
+			        float NdotH = max(dot(normal, halfVector), 0.0); 
+			        float NdotV = max(dot(normal, eyeDir), 0.0);
+			        float VdotH = max(dot(eyeDir, halfVector), 0.0);
+			        vec3 mSquared = roughnessValue * roughnessValue;
+			        
+					vec3 alpha = NdotH * NdotH * (mSquared - 1.0) + 1.0;					
+					vec3 D = mSquared / (alpha * alpha * 3.14159265358979323846264);
+						
+					alpha = (roughnessValue + 1.0) * (roughnessValue + 1.0) / 8.0;					
+					vec3 G1 = NdotL / (NdotL * (1.0 - alpha) + alpha);
+					vec3 G2 = NdotV / (NdotV * (1.0 - alpha) + alpha);
+					vec3 G = G1 * G2;
+			       
+					vec3 F = F0 + (1.0 - F0) * pow(2.0, (-5.55473 * VdotH - 6.98316) * VdotH);
+			       
+					if(NdotL > 0.0 && NdotV > 0.0){
+						specular = D * F * G / (4.0 * NdotL * NdotV);
+					}
+					
+			    }
+			    
+				//vec3 finalValue = NdotL * (diffuseColor + specular) / lightDirection[2];				
+
+				//vec3 finalValue = old_NdotL * (diffuseColor + specular) / r * 50.0;
+
+				vec3 finalValue = old_NdotL * (diffuseColor + specular) / r * 50.0;
+
+				//vec3 finalValue = 50.0 * specular;
+
+			    gl_FragColor = vec4(finalValue, 1.0);
+			}
+
+		</script>
+
+		<script id="vertex_shader" type="x-shader/x-vertex">
+
+			varying vec3 LightDir[2];
+			varying vec3 vnormal;
+			varying vec3 vpos;
+
+			varying vec2 vUv;
+		
+			void main()
+			{
+				vUv = uv*1.0;				
+				
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+			    // vertex normal
+				vnormal = normalize(normalMatrix * normal);
+
+				// vertex position
+				vpos = vec3(modelViewMatrix * vec4(position, 1.0));
+			}
+
+		</script>
+
+		<script>
+
+			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			var container, stats;
+
+			var camera, cameraTarget, scene, renderer;
+
+			var mesh;
+
+			const mesh_list = [];
+
+			var material, uniforms;
+
+			var clock = new THREE.Clock();
+
+			var rotationSpeed = 0.8;
+
+			var effectController = {
+				'rotationSpeed' : 0.8,
+				'specularColor' : [255,255,255],
+				//'diffuseColor' : [201,180,158],
+				'diffuseColor': [144,116,92],
+				'Roughness': 0.86,
+				'Fresnel_reflectance' : 0.0,
+				"Diffuse_amount" : 0.7
+			};
+
+			init();
+			initGUI();
+			animate();
+
+			function init() {
+
+				container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 15 );
+				// camera.position.set( 3, 1, 3 );
+				camera.position.set( 0, 0, 0 );
+
+				// cameraTarget = new THREE.Vector3( 0, -0.25, 0 );
+
+				cameraTarget = new THREE.Vector3( 0, 0, -1 );
+
+				console.log(camera.matrixWorldInverse);
+
+				scene = new THREE.Scene();
+				scene.fog = new THREE.Fog( 0x72645b, 2, 30 );
+				
+
+				//shader uniforms
+
+				uniforms = {
+
+					LightDirection1: { type: "v3", value: new THREE.Vector3(0.0, 10.0, 0.0) },
+					specularColor: { type: "v3", value: new THREE.Vector3(0.0, 0.0, 0.0) },
+					//diffuseColor: { type: "v3", value: new THREE.Vector3(0.0, 0.0, 0.0) },
+					//roughnessValue: { type: "f", value: 0.1 },
+					//F0: { type: "f", value: 0.8 },
+					k: { type: "f", value: 0.7 },	
+					diffuseMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/a.png") },
+					roughnessMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/r.png") },
+					specularMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/s.png") },	
+					normalMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/n.png") }			
+				};
+
+				uniforms.diffuseMap.value.wrapS = uniforms.diffuseMap.value.wrapT = THREE.RepeatWrapping;
+				uniforms.diffuseMap.value.repeat.set( 2, 2 );
+
+				console.log(uniforms.diffuseMap.value, "here", THREE.RepeatWrapping);
+
+			
+				// Ground
+
+				var plane = new THREE.Mesh(
+
+					new THREE.PlaneBufferGeometry( 40, 40 ),
+					new THREE.MeshPhongMaterial( { color: 0x999999, specular: 0x101010 } )
+
+				);
+				plane.rotation.x = -Math.PI/2;
+				plane.position.y = -0.5;
+				scene.add( plane );
+
+
+				plane.receiveShadow = true;				
+
+				// PLY file
+				
+				//var loader = new THREE.PLYLoader();
+				var manager = new THREE.LoadingManager();	
+				var objLoader = new THREE.OBJLoader(manager);				
+				//objLoader.setPath('/models/');
+				
+				
+
+				// for(let i=1; i<21; i++){
+				// 	objLoader.load('/models/'+i.toString()+'_uv.obj', function (object) {
+				// 		material = new THREE.ShaderMaterial( {
+
+				// 			uniforms: uniforms,
+				// 			vertexShader: document.getElementById( 'vertex_shader' ).textContent,
+				// 			fragmentShader: document.getElementById( 'fragment_shader' ).textContent
+
+				// 			} );
+
+						
+
+				// 		// object.children[0].geometry.computeFaceNormals();
+				// 		// object.children[0].geometry.computeVertexNormals();
+						
+				// 		// object.children[0].position.set( 0, -.7, 0 );
+				// 		// object.children[0].rotation.set( 0, - Math.PI / 2, 0 );
+				// 		// object.children[0].rotation.set( Math.PI / 2, 0, 0 );
+				// 		// object.children[0].position.set( 0, -.7, 0 );
+				// 		// object.children[0].scale.set( 7, 7, 7 );
+				// 		// object.children[0].scale.set( 0.5, 0.5, 0.5 );
+				// 		object.children[0].scale.set( 40, 40, 40 );
+						
+				// 		// object.children[0].geometry.computeBoundingBox();
+				// 		// var boundingBox = object.children[0].geometry.boundingBox;
+
+				// 		// var position = new THREE.Vector3();
+				// 		// position.subVectors( boundingBox.max, boundingBox.min );
+				// 		// position.multiplyScalar( 0.5 );
+				// 		// position.add( boundingBox.min );
+
+				// 		// position.applyMatrix4( object.children[0].matrixWorld );
+
+				// 		// // console.log("call", object.children[0].position, position);
+
+				// 		// // console.log("call", object.children[0].matrixWorld);
+
+				// 		// object.children[0].position.set(position);
+
+				// 		// console.log("call", object.children[0].position, position);
+
+						
+				// 		object.children[0].castShadow = true;
+				// 		object.children[0].receiveShadow = true;
+
+				// 		object.children[0].material = material;
+
+				// 		scene.add(object);	
+						
+						
+						
+				// 		// mesh = object.children[0];
+				// 		mesh_list.push(object.children[0]);
+				// 	});
+				// }				
+				objLoader.load('/models/sphere.obj', function (object) {
+					material = new THREE.ShaderMaterial( {
+
+						uniforms: uniforms,
+						vertexShader: document.getElementById( 'vertex_shader' ).textContent,
+						fragmentShader: document.getElementById( 'fragment_shader' ).textContent
+
+						} );
+					
+					
+					// console.log('call', object.children[0].geometry.attributes.position.array.length);
+					console.log('call', camera.matrixWorldInverse);
+
+					// object.children[0].geometry.computeFaceNormals();
+					// object.children[0].geometry.computeVertexNormals();
+					
+					// object.children[0].position.set( 0, -.7, 0 );
+					// object.children[0].rotation.set( 0, - Math.PI / 2, 0 );
+					// object.children[0].rotation.set( Math.PI / 2, 0, 0 );
+					// object.children[0].position.set( 0, -.7, 0 );
+					// object.children[0].scale.set( 7, 7, 7 );
+					object.children[0].scale.set( 0.5, 0.5, 0.5 );
+					// object.children[0].scale.set( 30, 30, 30 );
+
+					object.children[0].position.set( 0, 0, -3 );
+
+					
+					object.children[0].castShadow = true;
+					object.children[0].receiveShadow = true;
+
+					object.children[0].material = material;
+
+					scene.add(object);	
+					
+					
+
+					mesh = object.children[0];
+				});
+
+				/*loader.addEventListener( 'load', function ( event ) {
+
+					var geometry = event.content;
+					material = new THREE.ShaderMaterial( {
+
+						uniforms: uniforms,
+						vertexShader: document.getElementById( 'vertex_shader' ).textContent,
+						fragmentShader: document.getElementById( 'fragment_shader' ).textContent
+
+						} );
+
+					geometry.computeFaceNormals();
+					geometry.computeVertexNormals();
+					mesh = new THREE.Mesh( geometry, material );
+					mesh.position.set( 0, -.7, 0 );
+					mesh.rotation.set( 0, - Math.PI / 2, 0 );
+					//mesh.scale.set( 7, 7, 7 );
+					mesh.scale.set( 0.5, 0.5, 0.5 );
+
+					mesh.castShadow = true;
+					mesh.receiveShadow = true;
+
+					scene.add( mesh );
+
+				} );
+				loader.load( './models/sphere.obj' );*/
+
+				// Lights
+
+				scene.add( new THREE.AmbientLight( 0x777777 ) );
+
+				//addShadowedLight( 0, 1, 1, 0xffffff, 1.35 );
+
+				const light = new THREE.PointLight( 0xffffff, 1, 100 );
+				light.position.set( 0, 1, -2 );
+				light.shadowMapVisible = true;
+				scene.add( light );
+
+				// renderer
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setClearColor( 0x72645b );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.setFaceCulling ( "back", "ccw" );
+
+				renderer.gammaInput = true;
+				renderer.gammaOutput = true;
+
+				renderer.shadowMapEnabled = true;
+				renderer.shadowMapCullFace = THREE.CullFaceBack;
+
+				container.appendChild( renderer.domElement );
+
+
+				// stats
+
+				stats = new Stats();
+				stats.domElement.style.position = 'absolute';
+				stats.domElement.style.top = '0px';
+				container.appendChild( stats.domElement );
+
+				// resize
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+			}
+
+			function addShadowedLight( x, y, z, color, intensity ) {
+
+				var directionalLight = new THREE.DirectionalLight( color, intensity );
+				directionalLight.position.set( x, y, z )
+				scene.add( directionalLight );
+
+				directionalLight.castShadow = true;
+				// directionalLight.shadowCameraVisible = true;
+
+				var d = 1;
+				directionalLight.shadowCameraLeft = -d;
+				directionalLight.shadowCameraRight = d;
+				directionalLight.shadowCameraTop = d;
+				directionalLight.shadowCameraBottom = -d;
+
+				directionalLight.shadowCameraNear = 1;
+				directionalLight.shadowCameraFar = 4;
+
+				directionalLight.shadowMapWidth = 1024;
+				directionalLight.shadowMapHeight = 1024;
+
+				directionalLight.shadowBias = -0.005;
+				directionalLight.shadowDarkness = 0.15;
+
+			}
+
+			function guiChanged() {
+
+				rotationSpeed = effectController.rotationSpeed;
+
+				// //bug in dat.gui - color returns hex value instead of rgb
+				// function cutHex(h) {return (h.charAt(0)=="#") ? h.substring(1,7):h}
+				// if(typeof(effectController.specularColor) == "string"){
+				// 	var temp = [0, 0, 0];
+				// 	temp[0] = parseInt(((effectController.specularColor).substring(1,7)).substring(0,2),16);
+				// 	temp[1] = parseInt(((effectController.specularColor).substring(1,7)).substring(2,4),16);
+				// 	temp[2] = parseInt(((effectController.specularColor).substring(1,7)).substring(4,6),16);
+				// 	uniforms[ 'specularColor' ].value = new THREE.Vector3().fromArray( temp ).divideScalar( 255 );
+				// }
+				// else{
+				// 	uniforms[ 'specularColor' ].value = new THREE.Vector3().fromArray( effectController.specularColor ).divideScalar( 255 );
+				// }
+
+				// if(typeof(effectController.diffuseColor) == "string"){
+				// 	var temp = [0, 0, 0];
+				// 	temp[0] = parseInt(((effectController.diffuseColor).substring(1,7)).substring(0,2),16);
+				// 	temp[1] = parseInt(((effectController.diffuseColor).substring(1,7)).substring(2,4),16);
+				// 	temp[2] = parseInt(((effectController.diffuseColor).substring(1,7)).substring(4,6),16);
+				// 	uniforms[ 'diffuseColor' ].value = new THREE.Vector3().fromArray( temp ).divideScalar( 255 );
+				// }
+				// else{
+				// 	uniforms[ 'diffuseColor' ].value = new THREE.Vector3().fromArray( effectController.diffuseColor ).divideScalar( 255 );
+				// }
+
+				// uniforms[ 'roughnessValue' ].value = effectController.Roughness;
+				// uniforms[ 'F0' ].value = effectController.Fresnel_reflectance;
+				uniforms[ 'k' ].value = effectController.Diffuse_amount;				
+
+			}
+
+			function initGUI() {
+
+				var gui = new dat.GUI();
+
+				gui.add( effectController, 'rotationSpeed', 0.0, 5.0, 0.1 ).onChange( guiChanged );
+				// gui.addColor( effectController , 'specularColor' ).onChange( guiChanged );
+				// gui.addColor( effectController , 'diffuseColor' ).onChange( guiChanged );
+				// gui.add( effectController, 'Roughness', 0.0, 1.0, 0.01 ).onChange( guiChanged );
+				// gui.add( effectController, 'Fresnel_reflectance', 0.0, 5.0, 0.1 ).onChange( guiChanged );
+				// gui.add( effectController, 'Diffuse_amount', 0.0, 1.0, 0.01 ).onChange( guiChanged );
+
+				guiChanged();
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				render();
+				stats.update();
+
+			}
+
+			function render() {
+
+				var delta = clock.getDelta();
+
+				mesh.rotation.y += -delta * rotationSpeed;	
+				// for(let i=0; i<mesh_list.length;i++){
+				// 	mesh_list[i].rotation.y += -delta * rotationSpeed;	
+				// }			
+
+				camera.lookAt( cameraTarget );
+
+				renderer.render( scene, camera );
+				
+
+			}
+
+		</script>
+	</body>
+</html>
