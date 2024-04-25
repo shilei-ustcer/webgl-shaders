@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html>
 	<head>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./js/three.module.js",
+					"@mkkellogg/gaussian-splats-3d": "./js/gaussian-splats-3d.module.js"
+				}
+			}
+		  </script>
 		<style>
 			body {
 				background:#000;
@@ -13,16 +21,24 @@
 
 	</head>
 	<body>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"></script>
+
+		
+
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"></script>		
 		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
-		<script src="js/loaders/PLYLoader.js"></script>
-		<script src="js/loaders/STLLoader.js"></script>
-		<script src="js/loaders/OBJLoader2.js"></script>
+		<script src="js/loaders/PLYLoader.js" type="module"></script>
+		<script src="js/loaders/STLLoader.js" type="module"></script>
+		<script src="js/loaders/OBJLoader6.js" type="module"></script>
 		<script src="js/Detector.js"></script>
 		<script src="js/stats.min.js"></script>
 		<script src="js/dat.gui.min.js"></script>
+		
+		
 
 		<script id="fragment_shader" type="x-shader/x-fragment">
+
+			
 			uniform vec3 LightDirection1;
 			uniform vec3 specularColor;
 			//uniform vec3 diffuseColor;
@@ -37,7 +53,20 @@
 
 			varying vec3 vnormal;
 			varying vec3 vpos;
-			varying vec2 vUv;	
+			varying vec2 vUv;
+			
+			varying vec3 vBarycentric;	
+			
+			//vec3 sample_texture(vec3 texture, vec3 w){
+			//	float R = 5.0;
+			//	int w_x = int(w.x * R);
+			//	int w_y = int(w.y * R);
+			//	if ((w.x + w.y) * R - w_x - w_y <= 1) {
+			//		texture_k = texture[(w_y * R + w_x) * 3 + k];
+			//	}else{
+			//		texture_k = texture[((R - 1 - w_y) * R + (R - 1 - w_x)) * 3 + k];
+			//	}
+			//}
 
 			vec3 getNormal(vec3 normal, sampler2D normalMap,vec2 vUv){
 				vec3 a = vec3(0.0, 0.0, 1.0);
@@ -61,7 +90,8 @@
 				
 				R = mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0) + nu_skew + R;
 
-				a = texture2D(normalMap, vUv).rgb;					
+				vec2 uv = vBarycentric.x * vec2(0.0,0.0) + vBarycentric.y * vec2(1.0,0.0) + vBarycentric.z * vec2(0.0,1.0);
+				a = texture2D(normalMap,uv).rgb;				
 				a = normalize(a);		
 
 				normal = vec3(R[0][0]*a[0]+R[0][1]*a[1]+R[0][2]*a[2], R[1][0]*a[0]+R[1][1]*a[1]+R[1][2]*a[2], R[2][0]*a[0]+R[2][1]*a[1]+R[2][2]*a[2]);
@@ -69,10 +99,12 @@
 
 				return normal;
 			}
-						
+
+			
+			
 
 			void main()
-			{
+			{				
 				vec3 lightDirection = normalize(LightDirection1-vpos); // to light
 				//vec3 lightDirection = normalize(LightDirection1);
 				float r = length(LightDirection1-vpos);
@@ -86,9 +118,11 @@
 
 				old_NdotL = NdotL;
 
-				vec3 diffuseColor = texture2D(diffuseMap, vUv).rgb;
-				vec3 roughnessValue = texture2D(roughnessMap, vUv).rgb;
-				vec3 F0 = texture2D(specularMap, vUv).rgb;
+				vec2 uv = vBarycentric.x * vec2(0.0,0.0) + vBarycentric.y * vec2(1.0,0.0) + vBarycentric.z * vec2(0.0,1.0);
+				vec3 diffuseColor = texture2D(diffuseMap,uv).rgb;
+				//vec3 diffuseColor = vec3(1.0, 1.0, 1.0);
+				vec3 roughnessValue = texture2D(roughnessMap, uv).rgb;
+				vec3 F0 = texture2D(specularMap, uv).rgb;
 
 				diffuseColor = diffuseColor * (1.0 - F0);
 				diffuseColor = diffuseColor / 3.14159265358979323846264;
@@ -128,7 +162,8 @@
 				//vec3 finalValue = old_NdotL * (diffuseColor + specular) / r * 50.0;
 
 				vec3 finalValue = old_NdotL * (diffuseColor + specular) / r * 50.0;
-
+				//vec3 finalValue = vec3(vBarycentric.x, vBarycentric.y, vBarycentric.z);
+				
 				//vec3 finalValue = 50.0 * specular;
 
 			    gl_FragColor = vec4(finalValue, 1.0);
@@ -138,30 +173,72 @@
 
 		<script id="vertex_shader" type="x-shader/x-vertex">
 
+			
+
 			varying vec3 LightDir[2];
 			varying vec3 vnormal;
 			varying vec3 vpos;
 
 			varying vec2 vUv;
+
+			attribute vec3 barycentric;
+
+			attribute float arrSize;
+  
+			varying vec3 vBarycentric;
 		
 			void main()
 			{
 				vUv = uv*1.0;				
 				
-				gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);				
 
 			    // vertex normal
 				vnormal = normalize(normalMatrix * normal);
 
 				// vertex position
 				vpos = vec3(modelViewMatrix * vec4(position, 1.0));
+				
+				vBarycentric = barycentric;
+						
+				//vBarycentric = vec3( arrSize );
+					
 			}
 
-		</script>
+		</script>	
+		
+		
 
-		<script>
+		<script type="module">
 
-			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			// import {KSplatLoader} from '@mkkellogg/gaussian-splats-3d';
+			// import * as three from 'three'
+			// import {SplatMesh} from 'gaussian-splats-3d';
+			
+
+			// var truck;
+			// KSplatLoader.loadFromURL("models/truck.ksplat").then(function(result){
+			// 	truck = result;	
+			// 	console.log(truck);		
+
+			// 	truck = new SplatMesh(false, false, 1.25, false, true, false, 2048, 0);
+
+				
+
+			// 	const addSplatBufferOptions = {
+			// 		'rotation': undefined,
+			// 		'position': undefined,
+			// 		'scale': undefined,
+			// 		'splatAlphaRemovalThreshold': undefined,
+			// 	};
+
+			// 	truck.build([result], [addSplatBufferOptions], true, true);
+
+
+				// console.log(truck);		
+				
+				if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
 
 			var container, stats;
 
@@ -172,6 +249,8 @@
 			const mesh_list = [];
 
 			var material, uniforms;
+
+			var attributes;
 
 			var clock = new THREE.Clock();
 
@@ -197,14 +276,23 @@
 				document.body.appendChild( container );
 
 				camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 15 );
+
+				// camera = new three.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 15 );
+
+				// camera = new three.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 1000 );
+
+				// camera.up.set(0, -1, -.17);				
+
 				// camera.position.set( 3, 1, 3 );
 				camera.position.set( 0, 0, 0 );
+				// camera.position.set(-5, -1, -1);
 
 				// cameraTarget = new THREE.Vector3( 0, -0.25, 0 );
 
 				cameraTarget = new THREE.Vector3( 0, 0, -1 );
+				// cameraTarget = new THREE.Vector3( -1.72477, 0.05395, -0.00147);
 
-				console.log(camera.matrixWorldInverse);
+				// console.log(camera.matrixWorldInverse);
 
 				scene = new THREE.Scene();
 				scene.fog = new THREE.Fog( 0x72645b, 2, 30 );
@@ -220,16 +308,16 @@
 					//roughnessValue: { type: "f", value: 0.1 },
 					//F0: { type: "f", value: 0.8 },
 					k: { type: "f", value: 0.7 },	
-					diffuseMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/a.png") },
-					roughnessMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/r.png") },
-					specularMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/s.png") },	
-					normalMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/n.png") }			
+					diffuseMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/diffuse.png") },
+					roughnessMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/roughness.png") },
+					specularMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/specular.png") },	
+					normalMap: { type: "t", value: THREE.ImageUtils.loadTexture("images/normal.png") }			
 				};
 
 				uniforms.diffuseMap.value.wrapS = uniforms.diffuseMap.value.wrapT = THREE.RepeatWrapping;
 				uniforms.diffuseMap.value.repeat.set( 2, 2 );
 
-				console.log(uniforms.diffuseMap.value, "here", THREE.RepeatWrapping);
+				console.log(uniforms.diffuseMap,  "here", THREE.RepeatWrapping);
 
 			
 				// Ground
@@ -310,20 +398,48 @@
 				// 		// mesh = object.children[0];
 				// 		mesh_list.push(object.children[0]);
 				// 	});
-				// }				
+				// }	
+				
+				attributes = {
+					arrSize: {	type: 'f', value: [] },
+					barycentric: {type: 'vec3', value: []},
+				};	
+
+
 				objLoader.load('/models/sphere.obj', function (object) {
+
+					//var values = attributes.arrSize.value;
+					const count = object.children[0].geometry.attributes.position.length;
+					let arrSize = new THREE.BufferAttribute(new Float32Array(count), 1);  // Here "1" is the places the attribute would take					
+					for(let i=0;i<count; i++){
+						// values[ i ] = 100;
+						arrSize.array[i] = 100.; // Assigning a random value as attribute here
+					}
+					object.children[0].geometry.addAttribute("arrSize", arrSize, 1); // Access in shader later											
+
+					// const bary = [];
+					// const count2 = object.children[0].geometry.attributes.position.length / 9;
+					// for(let i=0;i<count2; i++){
+					// 	bary.push(0, 0, 1,
+					// 			  0, 1, 0,
+					// 			  1, 0, 0);
+					// }
+					// const array = new Float32Array(bary);
+					// const barycentric = new THREE.BufferAttribute(array, 3);
+					// object.children[0].geometry.addAttribute('barycentric', barycentric);
+								
+
 					material = new THREE.ShaderMaterial( {
 
 						uniforms: uniforms,
+						attributes:     attributes,
 						vertexShader: document.getElementById( 'vertex_shader' ).textContent,
 						fragmentShader: document.getElementById( 'fragment_shader' ).textContent
 
 						} );
-					
-					
-					// console.log('call', object.children[0].geometry.attributes.position.array.length);
-					console.log('call', camera.matrixWorldInverse);
 
+
+					
 					// object.children[0].geometry.computeFaceNormals();
 					// object.children[0].geometry.computeVertexNormals();
 					
@@ -349,6 +465,10 @@
 
 					mesh = object.children[0];
 				});
+
+				console.log("call",  attributes);				
+					
+				
 
 				/*loader.addEventListener( 'load', function ( event ) {
 
@@ -391,6 +511,7 @@
 				// renderer
 
 				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				// renderer = new three.WebGLRenderer( { antialias: true } );
 				renderer.setClearColor( 0x72645b );
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
@@ -416,7 +537,7 @@
 
 				window.addEventListener( 'resize', onWindowResize, false );
 
-			}
+			}			
 
 			function addShadowedLight( x, y, z, color, intensity ) {
 
@@ -514,18 +635,58 @@
 
 				var delta = clock.getDelta();
 
-				mesh.rotation.y += -delta * rotationSpeed;	
+				//mesh.rotation.y += -delta * rotationSpeed;	
 				// for(let i=0; i<mesh_list.length;i++){
 				// 	mesh_list[i].rotation.y += -delta * rotationSpeed;	
 				// }			
 
-				camera.lookAt( cameraTarget );
+				camera.lookAt( cameraTarget );	
+				
+				// console.log(camera);
 
 				renderer.render( scene, camera );
-				
 
+				// renderer.render(truck, camera);				
 			}
 
+
+			// });
+
+
+			
+			/*import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
+					// import * as THREE from 'three';    
+				
+					const viewer = new GaussianSplats3D.Viewer({
+						'cameraUp': [0, -1, -0.54],
+						'initialCameraPosition': [-3.15634, -0.16946, -0.51552],
+						'initialCameraLookAt': [1.52976, 2.27776, 1.65898],
+						'sharedMemoryForWorkers': false,
+						'rootElement': container
+					});
+
+
+					
+
+					container.removeChild( renderer.domElement );
+					container.appendChild(viewer.renderer.domElement);
+					
+
+
+					let path = 'models/garden.ksplat';					
+					viewer.addSplatScene(path, {
+					'streamView': true
+					})
+					.then(() => {
+
+
+
+						viewer.start();
+					});*/
+
+			
+
+			
 		</script>
 	</body>
 </html>
